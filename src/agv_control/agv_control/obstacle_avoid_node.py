@@ -82,6 +82,11 @@ class ObstacleAvoidNode(Node):
         # Publisher
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
+        # Smooth publish timer — sends at 20Hz regardless of scan rate
+        self.last_cmd   = Twist()
+        self.in_escape  = False
+        self.create_timer(0.05, self.publish_timer)   # 20Hz
+
         self.get_logger().info("━━━ Obstacle Avoid Node Ready ━━━")
         self.get_logger().info(f"  WARNING  < {self.warn_m*1000:.0f} mm")
         self.get_logger().info(f"  CRITICAL < {self.crit_m*1000:.0f} mm")
@@ -113,36 +118,56 @@ class ObstacleAvoidNode(Node):
     def compute_escape_vector(self, crit_obs):
         fx, fy = 0.0, 0.0
         for angle_deg, dist_m in crit_obs:
+            # Vector FROM robot TO obstacle
             obs_x, obs_y = robot_deg_to_vector(angle_deg)
+            # Escape = opposite direction (away from obstacle)
             escape_x = -obs_x
             escape_y = -obs_y
+            # Stronger push when closer to obstacle
             weight = max(0.0, (self.target_m - dist_m) / self.target_m) ** 2
             fx += escape_x * weight
             fy += escape_y * weight
+
         mag = math.hypot(fx, fy)
-        if mag > 1e-6:
-            fx /= mag
-            fy /= mag
+        if mag < 1e-6:
+            # Fallback: if vector cancels out, move backward
+            return -1.0, 0.0
+        fx /= mag
+        fy /= mag
         return fx, fy
 
     def compute_escape_cmd(self, crit_obs, closest_deg, closest_m):
         twist = Twist()
         fx, fy = self.compute_escape_vector(crit_obs)
-        error  = self.target_m - closest_m
-        scale  = max(0.1, min(1.0, error / (self.target_m - self.crit_m + 1e-6)))
+
+        # Scale: closer = faster escape, but always at least 30% speed
+        error = max(0.0, self.target_m - closest_m)
+        scale = max(0.3, min(1.0, error / (self.target_m - self.crit_m + 1e-6)))
+
         twist.linear.x = fx * self.esc_lin * scale
         twist.linear.y = fy * self.esc_lin * scale
+
+        # Angular correction only for side obstacles
         ang_err = closest_deg if closest_deg <= 180 else closest_deg - 360
-        if 30 < abs(ang_err) < 150:
+        if 45 < abs(ang_err) < 135:
             ang_scale = min(1.0, abs(ang_err) / 90.0)
-            twist.angular.z = math.copysign(self.esc_ang * ang_scale * scale, ang_err)
+            twist.angular.z = math.copysign(
+                self.esc_ang * ang_scale * 0.5, ang_err
+            )
+
         return twist
 
     # ══════════════════════════════════════════════════════════
 
+    def publish_timer(self):
+        """Publish at 20Hz for smooth motion regardless of LiDAR scan rate."""
+        if not self.is_locked:
+            self.cmd_pub.publish(self.last_cmd)
+
     def scan_callback(self, msg):
-        # Priority 1: service locked -> do nothing, service controls /cmd_vel
+        # Priority 1: service locked -> clear cmd, service controls /cmd_vel
         if self.is_locked:
+            self.last_cmd = Twist()
             return
 
         all_obs  = self.parse_scan(msg)
@@ -175,14 +200,13 @@ class ObstacleAvoidNode(Node):
 
         # Priority 2: critical -> auto escape
         if crit_obs:
-            escape_cmd = self.compute_escape_cmd(
+            self.last_cmd = self.compute_escape_cmd(
                 crit_obs, closest_deg, closest[1]
             )
-            self.cmd_pub.publish(escape_cmd)
             return
 
         # Priority 3: safe -> pass hand gesture through
-        self.cmd_pub.publish(self.hand_cmd)
+        self.last_cmd = self.hand_cmd
 
 
 def main(args=None):
