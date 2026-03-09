@@ -1,0 +1,12 @@
+string command
+float32 linear_x
+float32 linear_y
+float32 angular_z
+float32 duration_sec
+---
+bool success
+string message
+bool is_locked
+float32 current_linear_x
+float32 current_linear_y
+float32 current_angular_z
