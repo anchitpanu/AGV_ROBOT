@@ -36,7 +36,7 @@ TARGET_M  = TARGET_MM / 1000.0
 
 ESCAPE_LIN = 0.12
 ESCAPE_ANG = 0.6
-LIDAR_OFFSET_DEG = 0.0
+LIDAR_OFFSET_DEG = 180.0
 
 
 def ros_angle_to_robot_deg(lidar_angle_rad, offset_deg=0.0):
