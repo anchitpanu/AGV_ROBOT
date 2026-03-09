@@ -78,16 +78,16 @@ TILT_DEAD   = 0.03   # dead-zone  ±3%
 TILT_MAX    = 0.15   # full speed ±15%
 
 # Colors (BGR)
-C_BG     = ( 18,  18,  20)
-C_GRAY   = (120, 120, 120)
+C_BG     = ( 35,  35,  40)
+C_GRAY   = (180, 180, 180)
 C_WHITE  = (255, 255, 255)
-C_GREEN  = ( 80, 220, 100)
-C_RED    = ( 60,  60, 220)
-C_YELLOW = ( 40, 220, 220)
-C_CYAN   = (220, 200,  60)
-C_ORANGE = ( 40, 160, 255)
-C_PANEL  = ( 40,  40,  45)
-C_ACCENT = (  0, 180, 255)
+C_GREEN  = ( 50, 255,  80)
+C_RED    = ( 50,  50, 255)
+C_YELLOW = (  0, 255, 255)
+C_CYAN   = (255, 230,  50)
+C_ORANGE = (  0, 180, 255)
+C_PANEL  = ( 55,  55,  62)
+C_ACCENT = (  0, 220, 255)
 
 DIR_COLORS = {
     "FORWARD":      C_GREEN,
@@ -115,10 +115,21 @@ class DualHandGestureControl(Node):
         self.max_angular = self.get_parameter("max_angular_speed").value
         self.flip_camera = self.get_parameter("flip_camera").value
 
-        self.bridge  = CvBridge()
-        self.create_subscription(Image, '/camera/image_raw',
-                                 self.image_callback, 10)
+        self.bridge = CvBridge()
+
+        # Open camera directly (no need for separate camera node)
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            self.get_logger().error("Cannot open camera /dev/video0!")
+        else:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.get_logger().info("Camera opened successfully")
+
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel_raw', 10)
+
+        # Timer to read camera at ~30fps
+        self.create_timer(0.033, self.camera_timer_callback)
 
         model_path = ensure_model()
         options = HandLandmarkerOptions(
@@ -299,8 +310,8 @@ class DualHandGestureControl(Node):
 
         # Backgrounds
         for bx in [bx1, bx2]:
-            cv2.rectangle(frame, (bx, by_top), (bx+bar_w, by_bot), (40,40,40), -1)
-            cv2.rectangle(frame, (bx, by_top), (bx+bar_w, by_bot), (80,80,80), 1)
+            cv2.rectangle(frame, (bx, by_top), (bx+bar_w, by_bot), (70,70,75), -1)
+            cv2.rectangle(frame, (bx, by_top), (bx+bar_w, by_bot), (140,140,145), 1)
 
         # LIN fill — cyan when active, gray when default
         lin_fill = int((lin / self.max_linear) * bar_h) if self.max_linear > 0 else 0
@@ -372,10 +383,10 @@ class DualHandGestureControl(Node):
         dir_color = DIR_COLORS.get(direction, C_GRAY)
 
         # Header
-        cv2.rectangle(panel, (0,0), (pw, 30), (20,20,24), -1)
+        cv2.rectangle(panel, (0,0), (pw, 30), (45,45,55), -1)
         cv2.putText(panel, "DIRECTION", (10, 21),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.58, C_ACCENT, 1)
-        cv2.line(panel, (0,30), (pw,30), (50,50,55), 1)
+        cv2.line(panel, (0,30), (pw,30), (90,90,100), 1)
 
         # Direction label
         label = direction.replace("_", " ")
@@ -388,10 +399,10 @@ class DualHandGestureControl(Node):
         rw, rh = 28, 38
         # Wheels
         for wx, wy in [(-rw//2-9,-10),(-rw//2-9, 8),(rw//2-1,-10),(rw//2-1, 8)]:
-            cv2.rectangle(panel,(cx+wx,cy+wy),(cx+wx+9,cy+wy+14),(65,65,65),-1)
+            cv2.rectangle(panel,(cx+wx,cy+wy),(cx+wx+9,cy+wy+14),(110,110,115),-1)
         # Body
-        cv2.rectangle(panel,(cx-rw//2,cy-rh//2),(cx+rw//2,cy+rh//2),(38,38,42),-1)
-        cv2.rectangle(panel,(cx-rw//2,cy-rh//2),(cx+rw//2,cy+rh//2),(80,80,85), 2)
+        cv2.rectangle(panel,(cx-rw//2,cy-rh//2),(cx+rw//2,cy+rh//2),(65,65,72),-1)
+        cv2.rectangle(panel,(cx-rw//2,cy-rh//2),(cx+rw//2,cy+rh//2),(120,120,130), 2)
         # Front marker
         cv2.rectangle(panel,(cx-rw//4,cy-rh//2-7),(cx+rw//4,cy-rh//2),dir_color,-1)
         cv2.putText(panel,"F",(cx-4,cy-rh//2-1),cv2.FONT_HERSHEY_SIMPLEX,0.28,(0,0,0),1)
@@ -423,7 +434,7 @@ class DualHandGestureControl(Node):
                                 dir_color, 3, tipLength=1.0)
 
         # Gesture guide
-        cv2.line(panel,(0,h-168),(pw,h-168),(50,50,55),1)
+        cv2.line(panel,(0,h-168),(pw,h-168),(90,90,100),1)
         guide = [
             ("1 finger",     "FORWARD",       "FORWARD"),
             ("2 fingers",    "BACKWARD",      "BACKWARD"),
@@ -436,7 +447,7 @@ class DualHandGestureControl(Node):
         for gesture, action, key in guide:
             active = (key == direction) or \
                      (key == "STRAFE_LEFT" and "STRAFE" in direction)
-            gc = dir_color if active else (70,70,75)
+            gc = dir_color if active else (140,140,148)
             prefix = ">" if active else " "
             cv2.putText(panel, f"{prefix} {gesture}", (8, gy),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.36, gc, 1)
@@ -445,7 +456,7 @@ class DualHandGestureControl(Node):
             gy += 22
 
         # Speed readout
-        cv2.line(panel,(0,h-42),(pw,h-42),(50,50,55),1)
+        cv2.line(panel,(0,h-42),(pw,h-42),(90,90,100),1)
         cv2.putText(panel, f"LIN: {lin:.3f} m/s", (8, h-28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.40, C_CYAN, 1)
         cv2.putText(panel, f"ANG: {ang:.3f} r/s", (8, h-12),
@@ -455,10 +466,26 @@ class DualHandGestureControl(Node):
     #  Main callback
     # ══════════════════════════════════════════════════════════
 
+    def camera_timer_callback(self):
+        """Grab frame directly from OpenCV camera."""
+        if not self.cap or not self.cap.isOpened():
+            return
+        ret, frame = self.cap.read()
+        if not ret:
+            return
+        self.process_frame(frame)
+
     def image_callback(self, msg):
+        """Fallback: receive frame from ROS topic."""
         frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+        self.process_frame(frame)
+
+    def process_frame(self, frame):
         if self.flip_camera:
             frame = cv2.flip(frame, 1)
+
+        # Brighten camera image
+        frame = cv2.convertScaleAbs(frame, alpha=1.4, beta=30)
 
         rgb      = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -548,7 +575,7 @@ class DualHandGestureControl(Node):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.38, C_ORANGE, 1)
 
         # Top status bar
-        cv2.rectangle(frame, (0,0), (w, 28), (18,18,22), -1)
+        cv2.rectangle(frame, (0,0), (w, 28), (40,40,48), -1)
         cv2.putText(frame, "Dual Hand Gesture Control",
                     (8, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.55, C_ACCENT, 1)
         r_c = C_GREEN  if has_right else C_GRAY
@@ -561,8 +588,8 @@ class DualHandGestureControl(Node):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, l_c, 1)
 
         # Direction panel
-        panel = np.full((h, self.PANEL_W, 3), (15,15,18), dtype=np.uint8)
-        cv2.line(panel, (0,0), (0,h), C_GRAY, 1)
+        panel = np.full((h, self.PANEL_W, 3), (28,28,34), dtype=np.uint8)
+        cv2.line(panel, (0,0), (0,h), (200,200,210), 1)
         self.draw_direction_panel(panel, direction, lin, ang)
 
         combined = np.hstack([frame, panel])
@@ -581,6 +608,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        if hasattr(node, 'cap') and node.cap.isOpened():
+            node.cap.release()
         node.destroy_node()
         cv2.destroyAllWindows()
         rclpy.shutdown()
